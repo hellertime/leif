@@ -89,25 +89,31 @@ def pairup(l):
 	islice = itertools.islice
 	return izip(islice(l,0,len(l)-1,2),islice(l,1,len(l),2))
 
-def flatten(l):
+def flatten(l,depth=None):
 	"""flatten a nested list
 
 	returns a generator which will produce the list
+	can limit the depth of the flattening by passing a second parameter
 
 	>>> list(flatten([1,2,[3]]))
 	[1,2,3]
 	>>> list(flatten([1,(2,3),[4,(5,6)]]))
 	[1,2,3,4,5,6]
 	"""
-	try:
-		for e in l:
-			if type(e) in (type(()),type([])):
-				for n in flatten(e):
-					yield n
-			else:
-				yield e
-	except TypeError:
+	if depth is not None and depth <= 0:
 		yield l
+	else:
+		try:
+			for e in l:
+				if type(e) in (type(()),type([])):
+					if depth is not None:
+						depth -= 1
+					for n in flatten(e,depth):
+						yield n
+				else:
+					yield e
+		except TypeError:
+			yield l
 
 def predicated_cartesian_product(predicate,first,*rest):
 	"""produce all combinations of list elements which satisfy the predicate

@@ -1,8 +1,10 @@
 """
 Classes and functions for dealing with data associated to the Indexer
 """
+import itertools
 import lazy
 import struct
+import sys
 
 class TermInstance(object):
 	"""The Index must deal with TermInstances when satisfying Queries
@@ -19,6 +21,7 @@ class TermInstance(object):
 	def __hash__(self): return int(self.position)
 	def __repr__(self): return '#TI:%d,%d' % (self.position,self.extent)
 	# the following should only be used for ordering not to test integers against the position
+	def __eq__(self,termInstance): return self.position == termInstance.position
 	def __gt__(self,termInstance): return self.position > termInstance.position
 	def __lt__(self,termInstance): return self.position < termInstance.position
 	def __ge__(self,termInstance): return self.position >= termInstance.position
@@ -29,12 +32,12 @@ class DocIdTermInstanceTable(object):
 	A DocIdTermTable has the following data:
 	docIdHash (DocId :: Int, TermInstanceSet :: Set)
 	termInstanceCount :: Int"""
-	__slots__ = ["docIdHash","termInstanceCount"]
+	__slots__ = ["docIdHash"]
 	def __init__(self):
 		self.docIdHash = dict()
-		self.termInstanceCount = property(self.getTermInstanceCount)
 	
-	def getTermInstanceCount(self):
+	@property
+	def termInstanceCount(self):
 		return sum(map(len,self.docIdHash.values()))
 	
 	def insertTermInstanceRecord(self,docId,termInstance):
@@ -56,6 +59,21 @@ class CompressedDocIdTermInstanceTableHeader(object):
 		self.docIdCount = 0
 		self.termInstanceCount = 0
 
+class DocIdTermInstanceVector(object):
+	"""Replaces the tuple returned by readers so that flatten will not expand the docId,[TermInstances] pairing"""
+	__slots__ = ["docId","termInstancesGenerator"]
+	def __init__(self,_docId,_termInstancesGenerator):
+		self.docId = _docId
+		self.termInstancesGenerator = _termInstancesGenerator
+	
+	def __eq__(self,docIdTermInstanceVector): return self.docId == docIdTermInstanceVector.docId
+	def __gt__(self,docIdTermInstanceVector): return self.docId > docIdTermInstanceVector.docId
+	def __lt__(self,docIdTermInstanceVector): return self.docId < docIdTermInstanceVector.docId
+	def __ge__(self,docIdTermInstanceVector): return self.docId >= docIdTermInstanceVector.docId
+	def __le__(self,docIdTermInstanceVector): return self.docId <= docIdTermInstanceVector.docId
+
+	def __repr__(self): return "#TIV:%d" % self.docId
+	
 # Disk Layout Constants
 SkipOffsetSizeInBytes = 4 # on disk we store the seek offset to the end of a table
 DocIdSizeInBytes = 4
@@ -84,7 +102,7 @@ def compressDocIdTermInstanceTable(_table):
 	termInstanceBlocks = []
 	for docId in sorted(_table.docIdHash):
 		termInstances = _table.docIdHash[docId]
-		skipOffsetBytes = docIdSizeInBytes
+		skipOffsetBytes = DocIdSizeInBytes
 		termInstanceCount = len(termInstances) # note this is not the same as: _table.termInstanceCount
 		skipOffsetBytes += termInstanceCount * TermInstanceSizeInBytes
 		termInstanceVector = list(lazy.flatten(map(_tuple,sorted(termInstances))))
@@ -93,7 +111,7 @@ def compressDocIdTermInstanceTable(_table):
 	compressedData = "".join(termInstanceBlocks)
 	header = CompressedDocIdTermInstanceTableHeader()
 	header.docIdCount = len(_table)
-	header.termIdCount = _table.termIdCount
+	header.termInstanceCount = _table.termInstanceCount
 	header.length = len(compressedData)
 	return (header,compressedData)
 
@@ -101,11 +119,11 @@ def decompressDocIdTermInstanceTable(_buffer,_header):
 	"""Creates a Python generator which will produce (docId,[TermInstance]) tuple
 	the [TermInstance] is a generator which will produce the TermInstance structures
 	associated with docId"""
-	def generateGenerator(_offset,_length):
-		currentOffset = 0
+	def generateDocIdTermInstanceVectors(_offset,_length):
+		currentOffset = _offset
 		_unpack = struct.unpack
 		while currentOffset < _offset + _length:
-			headerBytes = _buffer[_currentOffset:_currentOffset+SkipOffsetSizeInBytes+DocIdSizeInBytes]
+			headerBytes = _buffer[currentOffset:currentOffset+SkipOffsetSizeInBytes+DocIdSizeInBytes]
 			skipOffset,docId = _unpack("!II",headerBytes)
 			currentOffset += SkipOffsetSizeInBytes+DocIdSizeInBytes
 			# NOTE: the use of PositionSizeInBytes only works because PositionSizeInBytes == ExtentSizeInBytes
@@ -115,27 +133,162 @@ def decompressDocIdTermInstanceTable(_buffer,_header):
 			termInstanceElements = _unpack("!%dI" % termInstanceElementCount,termInstanceBytes)
 			def termInstanceGenerator():
 				for _position,_extent in lazy.pairup(termInstanceElements):
-					yield TermInstance(_position,_extent)
+					termInstance = TermInstance(_position,_extent)
+					yield termInstance
 
-			yield (docId,termInstanceGenerator())
+			yield DocIdTermInstanceVector(docId,termInstanceGenerator())
 
-	return generateGenerator(_header.offset,_header.length)
+	return generateDocIdTermInstanceVectors(_header.offset,_header.length)
 
 def readCompressedDocIdTermInstanceTable(_buffer,_header):
-	return (header,_buffer[_header.offset:_header.offset+_header.length])
+	return (_header,_buffer[_header.offset:_header.offset+_header.length])
 
 def readUncompressedDocIdTermInstanceTable(_table):
 	"""Creates a Python generator which will produce (docId,[TermInstance]) tuple
 	see decompressDocIdTermInstanceTable"""
-	def generatorGenerator():
+	def generateDocIdTermInstanceVectors():
 		for docId in sorted(_table.docIdHash):
-			def termInstanceGenerator():
+			def termInstanceGenerator(docId):
 				for termInstance in sorted(_table.docIdHash[docId]):
 					yield termInstance
 
-			yield (docId,termInstanceGenerator())
+			yield DocIdTermInstanceVector(docId,termInstanceGenerator(docId))
 	
-	return generatorGenerator()
+	return generateDocIdTermInstanceVectors()
 
 def nullUncompressedDocIdTermInstanceTable():
-	return (None,iter([]))
+	# returns a generator object to match semantics of a reader
+	return (_ for _ in [(None,iter([]))])
+
+def joinUncompressedDocIdTermInstanceTableReaders(readerList):
+	_peekable = lazy.peekable
+	_ifilter = itertools.ifilter
+	_flatten = lazy.flatten
+	return _peekable(sorted(_ifilter(None,_flatten(map(None,*readerList)))))
+
+class AnalyzedTerm(object):
+	"""each term is really a set of term occurrences"""
+	__slots__ = ["instanceSet"]
+	def __init__(self):
+		self.instanceSet = set()
+	
+	def addTermIdWithOptionalExtent(self,termId,extent=0):
+		self.instanceSet.add((termId,extent))
+	
+	def __repr__(self): return "#AT:%s" % repr(self.instanceSet)
+
+class AnalyzedDocument(object):
+	"""An AnalyzedDocument is a docId,[AnalyzedTerm] structure"""
+	__slots__ = ["docId","analyzedTermList"]
+	def __init__(self,_docId):
+		self.docId = _docId
+		self.analyzedTermList = list()
+	
+	def appendAnalyzedTerm(self,analyzedTerm):
+		self.analyzedTermList.append(analyzedTerm)
+	
+	def __repr__(self): return "#AD(%d):%s" % (self.docId,repr(self.analyzedTermList))
+
+class ComputedMatch(object):
+	"""Queries produce ComputedMatch(es)"""
+	__slots__ = ["docId","termInstanceVectors"]
+	def __init__(self,_docId,_termInstanceVectors):
+		self.docId = _docId
+		self.termInstanceVectors = _termInstanceVectors
+	
+	def computedMatchCartesianProductWithPredicate(self,predicate):
+		"""Return a new ComputedMatch which is the cartesian product of self.termInstanceVectors"""
+		return ComputedMatch(self.docId,list(lazy.predicated_cartesian_product(predicate,*self.termInstanceVectors)))
+	
+	def computedMatchSubsets(self,minSubsetSize=1,maxSubsetSize=5):
+		"""Return a new ComputedMatch with termInstanceVectors containing all the sub-sets of self.termInstaceVectors
+		Sub-sets will contain minSubsetSize to maxSubsetSize members
+		If maxSubsetSize is None and minSubsetSize=1 then this will effectively compute the powerset of self
+		*The POWERSET can be HUGE, be careful*"""
+		powerset = list()
+		minSubsetSize = minSubsetSize or 1
+		maxSubsetSize = maxSubsetSize or sys.maxint
+		for subsetSize in xrange(minSubsetSize,maxSubsetSize + 1):
+			try:
+				powerset += list(lazy.nary_subset(self.termInstanceVectors,subsetSize))
+			except StopIteration:
+				break
+
+		return ComputedMatch(self.docId,powerset)
+	
+	def _addOpAssert(self,other):
+		if not isinstance(other,ComputedMatch): raise TypeError("Cannot add ComputedMatch and %s" % type(other))
+		if self.docId != other.docId: raise ValueError("Cannot add ComputedMatch objects of differing docId")
+	
+	def __add__(self,computedMatch):
+		"""Return a new ComputedMatch"""
+		self._addOpAssert(computedMatch)
+		return ComputedMatch(self.docId,[self.termInstanceVectors,computedMatch.termInstanceVectors])
+	# make it work in both directions
+	__radd__ = __add__
+
+	def __iadd__(self,computedMatch):
+		"""Concatenate termInstanceVectors"""
+		self._addOpAssert(computedMatch)
+		self.termInstanceVectors += computedMatch.termInstanceVectors
+		self.termInstanceVectors.sort()
+		return self # Should __iadd__ return a value?
+	
+	def __getitem__(self,index): return self.termInstanceVectors[index]
+	def __len__(self): return len(self.termInstanceVectors)
+	def __hash__(self): return int(self.docId)
+	def __eq__(self,computedMatch): self.docId == computedMatch.docId
+	def __ne__(self,computedMatch): self.docId != computedMatch.docId
+	def __gt__(self,computedMatch): self.docId > computedMatch.docId
+	def __lt__(self,computedMatch): self.docId < computedMatch.docId
+	def __ge__(self,computedMatch): self.docId >= computedMatch.docId
+	def __le__(self,computedMatch): self.docId <= computedMatch.docId
+	def __iter__(self): return iter(self.termInstanceVectors)
+	def __repr__(self): return "#CM(%d):%s" % (self.docId,repr(self.termInstanceVectors))
+
+class ComputedMatchVector(object):
+	"""A container-like object holding ComputedMatch(es)
+	This does not provide a len(), since the internal generator can be infinite"""
+	__slots__ = ["computedMatchGenerator","realizedComputedMatchVector"]
+	def __init__(self,_computedMatchGenerator):
+		self.computedMatchGenerator = _computedMatchGenerator
+		self.realizedComputedMatchVector = list()
+	
+	def __iter__(self):
+		def vectorIterator(computedMatchVector):
+			iterationIndex = 0
+			while 1:
+				try:
+					yield computedMatchVector[iterationIndex]
+				except IndexError:
+					raise StopIteration
+				iterationIndex += 1
+
+		return vectorIterator(self)
+	
+	def __getitem__(self,index):
+		try:
+			while len(self.realizedComputedMatchVector) < index + 1:
+				self.realizedComputedMatchVector.append(self.computedMatchGenerator.next())
+		except StopIteration:
+			pass
+		return self.realizedComputedMatchVector[index]
+	
+	def __repr__(self): return "#CMV:%s..." % (repr(self.realizedComputedMatchVector))
+
+OP_AND = 1
+OP_ANDNOT = 2
+OP_BEFORE = 3
+OP_AFTER = 4
+OP_MINOC = 5
+OP_WITHIN = 6
+OP_SCOPE = 7
+
+def computedMatchVectorOp(opcode,expressionTree):
+	if opcode == OP_AND: return computedMatchVectorAndOp
+	elif opcode == OP_ANDNOT: return computedMatchVectorAndnotOp
+	elif opcode == OP_BEFORE: return computedMatchVectorBeforeOp
+	elif opcode == OP_AFTER: return computedMatchVectorAfterOp
+	elif opcode == OP_MINOC: return computedMatchVectorMinocOp
+	elif opcode == OP_WITHIN: return computedMatchVectorWithinOp
+	elif opcode == OP_SCOPE: return computedMatchVectorScopeOp
