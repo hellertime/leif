@@ -14,6 +14,16 @@ def getExpressionTreeFromString(inputString):
 	
 	return None
 
+def makeInitialEnvironmentFromLookupFunction(lookupFunction):
+	"""lookupFunction takes a termWord as input and returns a [DocIdTermInstanceVector]"""
+	class EnvironmentBase(object):
+		__slots__ = ["lookupFunction"]
+		def __init__(self,_lookupFunction): self.lookupFunction = _lookupFunction 
+		def __contains__(self,termWord): return True
+		def __getitem__(self,termWord): return self.lookupFunction(termWord)
+	
+	return [EnvironmentBase(lookupFunction)]
+
 def reduceTopLevel(expressionTree,initialEnvironment):
 	"""initialEnvironment must be a list"""
 	if isinstance(expressionTree,compiler.ast.Tuple):
@@ -22,17 +32,35 @@ def reduceTopLevel(expressionTree,initialEnvironment):
 			rator = rator.name
 			# Dispatch on rator
 			if rator == "Term":
+				print >> sys.stderr, "reduce -> Term"
 				return reduceTerm(rands,initialEnvironment)
 			elif rator == "And":
+				print >> sys.stderr, "reduce -> And"
 				return reduceAndOp(rands,initialEnvironment)
 			elif rator == "Andnot":
+				print >> sys.stderr, "reduce -> Andnot"
 				return reduceAndnotOp(rands,initialEnvironment)
+			elif rator == "Before":
+				print >> sys.stderr, "reduce -> Before"
+				return reduceBeforeOp(rands,initialEnvironment)
+			elif rator == "After":
+				print >> sys.stderr, "reduce -> After"
+				return reduceAfterOp(rands,initialEnvironment)
+			elif rator == "Minoc":
+				print >> sys.stderr, "reduce -> Minoc"
+				return reduceMinocOp(rands,initialEnvironment)
+			elif rator == "Within":
+				print >> sys.stderr, "reduce -> Within"
+				return reduceWithinOp(rands,initialEnvironment)
+			elif rator == "Scope":
+				print >> sys.stderr, "reduce -> Scope"
+				return reduceScopeOp(rands,initialEnvironment)
 	
 	return None
 
 def reduceTerm(termConstant,environmentFrames):
 	termConstant = termConstant[0]
-	if isinstance(termConstance,compiler.ast.Const):
+	if isinstance(termConstant,compiler.ast.Const):
 		term = termConstant.value
 		for environmentFrame in environmentFrames:
 			if term in environmentFrame: return environmentFrame[term]

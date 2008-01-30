@@ -3,6 +3,7 @@ Classes and functions for dealing with data associated to the Indexer
 """
 import itertools
 import lazy
+import operator
 import struct
 import sys
 
@@ -72,7 +73,7 @@ class DocIdTermInstanceVector(object):
 	def __ge__(self,docIdTermInstanceVector): return self.docId >= docIdTermInstanceVector.docId
 	def __le__(self,docIdTermInstanceVector): return self.docId <= docIdTermInstanceVector.docId
 
-	def __repr__(self): return "#TIV:%d" % self.docId
+	def __repr__(self): return "#TIV:%d<%s>" % (self.docId,list(self.termInstancesGenerator))
 	
 # Disk Layout Constants
 SkipOffsetSizeInBytes = 4 # on disk we store the seek offset to the end of a table
@@ -131,12 +132,12 @@ def decompressDocIdTermInstanceTable(_buffer,_header):
 			termInstanceBytes = _buffer[currentOffset:currentOffset+(termInstanceElementCount*PositionSizeInBytes)]
 			currentOffset += termInstanceElementCount*PositionSizeInBytes
 			termInstanceElements = _unpack("!%dI" % termInstanceElementCount,termInstanceBytes)
-			def termInstanceGenerator():
+			def termInstanceGenerator(termInstanceElements):
 				for _position,_extent in lazy.pairup(termInstanceElements):
 					termInstance = TermInstance(_position,_extent)
 					yield termInstance
 
-			yield DocIdTermInstanceVector(docId,termInstanceGenerator())
+			yield DocIdTermInstanceVector(docId,termInstanceGenerator(termInstanceElements))
 
 	return generateDocIdTermInstanceVectors(_header.offset,_header.length)
 
@@ -148,11 +149,11 @@ def readUncompressedDocIdTermInstanceTable(_table):
 	see decompressDocIdTermInstanceTable"""
 	def generateDocIdTermInstanceVectors():
 		for docId in sorted(_table.docIdHash):
-			def termInstanceGenerator(docId):
+			def termInstanceGenerator(_table,docId):
 				for termInstance in sorted(_table.docIdHash[docId]):
 					yield termInstance
 
-			yield DocIdTermInstanceVector(docId,termInstanceGenerator(docId))
+			yield DocIdTermInstanceVector(docId,termInstanceGenerator(_table,docId))
 	
 	return generateDocIdTermInstanceVectors()
 
@@ -208,6 +209,7 @@ class ComputedMatch(object):
 		powerset = list()
 		minSubsetSize = minSubsetSize or 1
 		maxSubsetSize = maxSubsetSize or sys.maxint
+		if maxSubsetSize < minSubsetSize: maxSubsetSize = minSubsetSize + 1
 		for subsetSize in xrange(minSubsetSize,maxSubsetSize + 1):
 			try:
 				powerset += list(lazy.nary_subset(self.termInstanceVectors,subsetSize))
@@ -276,6 +278,124 @@ class ComputedMatchVector(object):
 	
 	def __repr__(self): return "#CMV:%s..." % (repr(self.realizedComputedMatchVector))
 
+def computedMatchVectorAndOp(*computedMatchVectors):
+	"""Return a new ComputedMatchVector where all ComputedMatch(es) has equal docId(s)"""
+	def computedMatchGenerator():
+		docIdEq = lambda computedMatch: len(frozenset(computedMatch)) == 1
+		for computedMatches in lazy.predicated_cartesian_product(docIdEq,*computedMatchVectors):
+			if 0 not in map(len,computedMatches):
+				yield reduce(operator.__add__,computedMatches)
+	
+	return ComputedMatchVector(computedMatchGenerator())
+
+def computedMatchVectorAndnotOp(*computedMatchVectors):
+	"""Return a new ComputedMatchVector iff the first computedMatchVector has output and all others have no output"""
+	def computedMatchGenerator():
+		docIdEq = lambda computedMatch: len(frozenset(computedMatch)) == 1
+		for computedMatches in lazy.predicated_cartesian_product(docIdEq,*computedMatchVectors):
+			if len(computedMatches) == 1 or (len(computedMatches) > 1 and 0 == sum(map(len,computedMatches[1:]))):
+				yield computedMatches[0]
+	
+	return ComputedMatchVector(computedMatchGenerator())
+
+def _min(it):
+	m = min(it)
+	print >> sys.stderr, "DebugMin: %s -> %s" % (repr(it),repr(m))
+	return m
+
+def _max(it):
+	m = max(it)
+	print >> sys.stderr, "DebugMax: %s -> %s" % (repr(it),repr(m))
+	return m
+
+def computedMatchVectorBeforeOp(*computedMatchVectors):
+	"""Return a new ComputedMatchVector where the ComputedMatches are ordered ascending by instance position"""
+	def ascendingOrderTest(computedMatches):
+		if not computedMatches: return False
+		_flatten = lazy.flatten
+		inOrder = True
+		testComputedMatch = None
+		for checkComputedMatch in computedMatches:
+			if testComputedMatch and max(list(_flatten(testComputedMatch))).position > min(list(_flatten(checkComputedMatch))).position:
+				inOrder = False
+				break
+			testComputedMatch = checkComputedMatch
+
+		return inOrder
+	
+	def computedMatchGenerator():
+		for computedMatch in computedMatchVectorAndOp(*computedMatchVectors):
+			computedMatch = computedMatch.computedMatchCartesianProductWithPredicate(ascendingOrderTest)
+			if len(computedMatch):
+				yield computedMatch
+	
+	return ComputedMatchVector(computedMatchGenerator())
+
+def computedMatchVectorAfterOp(*computedMatchVectors):
+	"""Return a new ComputedMatchVector where the ComputedMatches are ordered descending by instance position"""
+	def descendingOrderTest(computedMatches):
+		if not computedMatches: return False
+		_flatten = lazy.flatten
+		inOrder = True
+		testComputedMatch = None
+		for checkComputedMatch in computedMatches:
+			if testComputedMatch and max(list(_flatten(testComputedMatch))).position < min(list(_flatten(checkComputedMatch))).position:
+				inOrder = False
+				break
+			testComputedMatch = checkComputedMatch
+
+		return inOrder
+	
+	def computedMatchGenerator():
+		for computedMatch in computedMatchVectorAndOp(*computedMatchVectors):
+			computedMatch = computedMatch.computedMatchCartesianProductWithPredicate(descendingOrderTest)
+			if len(computedMatch):
+				yield computedMatch
+	
+	return ComputedMatchVector(computedMatchGenerator())
+
+def computedMatchVectorWithinOp(distanceConstraint,*computedMatchVectors):
+	"""Return a new ComputedMatchVector where the ComputedMatches are Within distanceContraint of each others position"""
+	def distanceTest(computedMatches):
+		if not computedMatches: return False
+		_flatten = lazy.flatten
+		for computedMatchPair in lazy.nary_subset(list(_flatten(computedMatches)),2):
+			if abs(computedMatchPair[0].position - computedMatchPair[1].position) <= distanceConstraint:
+				return True
+	
+	def computedMatchGenerator():
+		for computedMatch in computedMatchVectorAndOp(*computedMatchVectors):
+			if distanceTest(computedMatch):
+				yield computedMatch
+	
+	return ComputedMatch(computedMatchGenerator())
+
+def computedMatchVectorMinocOp(minOccurrence=1,*computedMatchVectors):
+	def computedMatchGenerator():
+		for computedMatch in computedMatchVectorAndOp(*computedMatchVectors):
+			computedMatch = computedMatch.computedMatchSubsets(minOccurrence)
+			for subset in computedMatch:
+				if len(subset) == minOccurrence: # test that at least one subset has the minOccurrence length
+					yield computedMatch
+					break
+	
+	return ComputedMatch(computedMatchGenerator())
+
+def computedMatchVectorScopeOp(scopeComputedMatchVector,scopedComputedMatchVector):
+	"""Returns a ComputedMatchVector when the scoped* position is covered by the scope* extent"""
+	def scopeTest(computedMatches):
+		if not computedMatches: return False
+		scope,scoped = computedMatches
+		if scope.position == scoped.position or (scope.position < scoped.position and scoped.position < (scoped.position + scope.extent)):
+			return True
+	
+	def computedMatchGenerator():
+		for computedMatch in computedMatchVectorAndOp(scopeComputedMatchVector,scopedComputedMatchVector):
+			computedMatch = computedMatch.computedMatchCartesianProduceWithPredicate(scopeTest)
+			yield ComputedMatch(computedMatch.docId,[computedMatch[0][1]])
+	
+	return ComputedMatchVector(computedMatchGenerator())
+
 OP_AND = 1
 OP_ANDNOT = 2
 OP_BEFORE = 3
@@ -284,7 +404,7 @@ OP_MINOC = 5
 OP_WITHIN = 6
 OP_SCOPE = 7
 
-def computedMatchVectorOp(opcode,expressionTree):
+def computedMatchVectorOp(opcode):
 	if opcode == OP_AND: return computedMatchVectorAndOp
 	elif opcode == OP_ANDNOT: return computedMatchVectorAndnotOp
 	elif opcode == OP_BEFORE: return computedMatchVectorBeforeOp
