@@ -239,12 +239,12 @@ class ComputedMatch(object):
 	def __getitem__(self,index): return self.termInstanceVectors[index]
 	def __len__(self): return len(self.termInstanceVectors)
 	def __hash__(self): return int(self.docId)
-	def __eq__(self,computedMatch): self.docId == computedMatch.docId
-	def __ne__(self,computedMatch): self.docId != computedMatch.docId
-	def __gt__(self,computedMatch): self.docId > computedMatch.docId
-	def __lt__(self,computedMatch): self.docId < computedMatch.docId
-	def __ge__(self,computedMatch): self.docId >= computedMatch.docId
-	def __le__(self,computedMatch): self.docId <= computedMatch.docId
+	def __eq__(self,computedMatch): return self.docId == computedMatch.docId
+	def __ne__(self,computedMatch): return self.docId != computedMatch.docId
+	def __gt__(self,computedMatch): return self.docId > computedMatch.docId
+	def __lt__(self,computedMatch): return self.docId < computedMatch.docId
+	def __ge__(self,computedMatch): return self.docId >= computedMatch.docId
+	def __le__(self,computedMatch): return self.docId <= computedMatch.docId
 	def __iter__(self): return iter(self.termInstanceVectors)
 	def __repr__(self): return "#CM(%d):%s" % (self.docId,repr(self.termInstanceVectors))
 
@@ -368,7 +368,7 @@ def computedMatchVectorWithinOp(distanceConstraint,*computedMatchVectors):
 			if distanceTest(computedMatch):
 				yield computedMatch
 	
-	return ComputedMatch(computedMatchGenerator())
+	return ComputedMatchVector(computedMatchGenerator())
 
 def computedMatchVectorMinocOp(minOccurrence=1,*computedMatchVectors):
 	def computedMatchGenerator():
@@ -379,7 +379,7 @@ def computedMatchVectorMinocOp(minOccurrence=1,*computedMatchVectors):
 					yield computedMatch
 					break
 	
-	return ComputedMatch(computedMatchGenerator())
+	return ComputedMatchVector(computedMatchGenerator())
 
 def computedMatchVectorScopeOp(scopeComputedMatchVector,scopedComputedMatchVector):
 	"""Returns a ComputedMatchVector when the scoped* position is covered by the scope* extent"""
@@ -391,7 +391,7 @@ def computedMatchVectorScopeOp(scopeComputedMatchVector,scopedComputedMatchVecto
 	
 	def computedMatchGenerator():
 		for computedMatch in computedMatchVectorAndOp(scopeComputedMatchVector,scopedComputedMatchVector):
-			computedMatch = computedMatch.computedMatchCartesianProduceWithPredicate(scopeTest)
+			computedMatch = computedMatch.computedMatchCartesianProductWithPredicate(scopeTest)
 			yield ComputedMatch(computedMatch.docId,[computedMatch[0][1]])
 	
 	return ComputedMatchVector(computedMatchGenerator())
@@ -412,3 +412,5 @@ def computedMatchVectorOp(opcode):
 	elif opcode == OP_MINOC: return computedMatchVectorMinocOp
 	elif opcode == OP_WITHIN: return computedMatchVectorWithinOp
 	elif opcode == OP_SCOPE: return computedMatchVectorScopeOp
+	else:
+		raise ValueError("Unknown opcode %d" % opcode)

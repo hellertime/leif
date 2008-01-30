@@ -97,8 +97,8 @@ def reduceWithinOp(expressionTree,environmentFrames):
 def reduceScopeOp(expressionTree,environmentFrames):
 	if len(expressionTree) > 2: raise ValueError("Scope operator takes exactly two arguments")
 	scope,scoped = expressionTree[0],expressionTree[1]
-	scopeRator,scopeRand = scope.nodes[0],scope.nodes[1]
-	scopedRator,scopedRand = scoped.nodes[0],scoped.nodes[1]
+	scopeRator,scopeRand = scope.nodes[0],scope.nodes[1:]
+	scopedRator,scopedRand = scoped.nodes[0],scoped.nodes[1:]
 	if not (scopeRator.name == scopedRator.name == "Term"): raise ValueError("Scope arguments must be Terms")
-	op = data.computedMatchVecorOp(data.OP_SCOPE)
+	op = data.computedMatchVectorOp(data.OP_SCOPE)
 	return op(reduceTerm(scopeRand,environmentFrames),reduceTerm(scopedRand,environmentFrames))
