@@ -32,28 +32,20 @@ def reduceTopLevel(expressionTree,initialEnvironment):
 			rator = rator.name
 			# Dispatch on rator
 			if rator == "Term":
-				print >> sys.stderr, "reduce -> Term"
 				return reduceTerm(rands,initialEnvironment)
 			elif rator == "And":
-				print >> sys.stderr, "reduce -> And"
 				return reduceAndOp(rands,initialEnvironment)
 			elif rator == "Andnot":
-				print >> sys.stderr, "reduce -> Andnot"
 				return reduceAndnotOp(rands,initialEnvironment)
 			elif rator == "Before":
-				print >> sys.stderr, "reduce -> Before"
 				return reduceBeforeOp(rands,initialEnvironment)
 			elif rator == "After":
-				print >> sys.stderr, "reduce -> After"
 				return reduceAfterOp(rands,initialEnvironment)
 			elif rator == "Minoc":
-				print >> sys.stderr, "reduce -> Minoc"
 				return reduceMinocOp(rands,initialEnvironment)
 			elif rator == "Within":
-				print >> sys.stderr, "reduce -> Within"
 				return reduceWithinOp(rands,initialEnvironment)
 			elif rator == "Scope":
-				print >> sys.stderr, "reduce -> Scope"
 				return reduceScopeOp(rands,initialEnvironment)
 	
 	return None

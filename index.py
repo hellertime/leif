@@ -10,6 +10,7 @@ import Queue
 import struct
 import sys
 import threading
+import time
 
 DefaultMetadataFileSuffix = ".meta"
 
@@ -36,6 +37,8 @@ class MemoryPartition(object):
 		self.indexKey = _indexKey
 		self.termInstanceLimit = None
 		self.termIdHash = dict()
+
+		self.__pickle_init__()
 	
 	def __pickle_init__(self):
 		if self.path:
@@ -50,6 +53,7 @@ class MemoryPartition(object):
 	
 	def writeToDisk(self):
 		if self.path:
+			print >> sys.stderr, "Pickling MMP to %s" % self.path
 			pickle_tools.pickle_dump_attrs(self,self.path,"termInstanceLimit","termIdHash","indexKey")
 	
 	def zeroAllData(self):
@@ -103,6 +107,9 @@ class ExternalPartition(object):
 		self.metadataFileSuffix = _metadataFileSuffix
 		self.termInstanceLimit = None
 		self.termIdHash = dict()
+
+		self.__pickle_init__()
+		self.__mmap_init__()
 	
 	def __pickle_init__(self):
 		metadataPath = self.path + self.metadataFileSuffix
@@ -159,9 +166,11 @@ class ExternalPartition(object):
 		it must be called after every index file size change
 		This will fail is self.path is missing
 		"""
-		fileSize = os.stat(self.path).st_size
-		self.fp = open(self.path,"rb")
-		self.mmap = mmap.mmap(self.fp.fileno(),fileSize,mmap.MAP_SHARED,mmap.PROT_READ)
+		if os.path.exists(self.path):
+			fileSize = os.stat(self.path).st_size
+			if fileSize > 0:
+				self.fp = open(self.path,"rb")
+				self.mmap = mmap.mmap(self.fp.fileno(),fileSize,mmap.MAP_SHARED,mmap.PROT_READ)
 	
 	def mergePartitions(self,termIdList,*partitions):
 		"""Merge the data from partitions into self
@@ -256,7 +265,7 @@ class ExternalPartition(object):
 		wp.close()
 		self.__mmap_init__()
 
-class growthStrategyFixedBuffer(object):
+class GrowthStrategyFixedBuffer(object):
 	"""a partition growth strategy where we merge into the next partition when the previous
 	growns past a certain ratio. Each partition however has a fixed max size, known when its created"""
 	__slots__ = ["bufferSizeFactor","growthFactor"]
@@ -308,7 +317,7 @@ class ReverseIndex(object):
 		self.path = _path
 		self.partitionPrefix = _partitionPrefix
 		self.indexKey = _indexKey
-		self.growthStrategy = growthStrategyFixedBuffer(10,3)
+		self.growthStrategy = GrowthStrategyFixedBuffer(4096,3)
 		self.makePartitionName = lambda name: os.sep.join([self.path,self.partitionPrefix + ".%s" % name])
 
 		mmp = openIndexPartition("MMP",":memory:%s" % self.makePartitionName("MMP"),indexKey=self.indexKey)
@@ -335,10 +344,22 @@ class ReverseIndex(object):
 				print >> sys.stderr, "Unable to load ReverseIndex metadata from %s" % path
 	
 	def openAllExternalPartitions(self):
+		print >> sys.stderr, "ReverseIndex has %d external partitions to open" % (self.externalPartitionCount)
 		for k in xrange(self.externalPartitionCount):
+			k = k + 1
 			self.partitions.append(openIndexPartition("EXP%d"%k,self.makePartitionName("EXP%d"%k),indexKey=self.indexKey))
 	
 	def writeToDisk(self):
+		# THIS IS A HACK!!! WE NEED BETTER merge synronization
+		busyLoopCounter = 0
+		while not (self.documentQueue.empty() and self.postingQueue.empty()):
+			time.sleep(30)
+			if busyLoopCounter % 5 == 0:
+				print >> sys.stderr, "WriteToDisk waiting on queues..."
+			busyLoopCounter += 1
+
+		print >> sys.stderr, "Writing to disk..."
+
 		path = self.makePartitionName("LEX")
 		pickle_tools.pickle_dump_attrs(self,path,"externalPartitionCount","lexicon","termCount")
 		for partition in self.partitions:
@@ -349,8 +370,8 @@ class ReverseIndex(object):
 		also created the ingress thread and associated data
 		"""
 		def _documentIngressThread(self):
+			willBlock = True
 			while 1:
-				willBlock = True
 				analyzedDocument = self.documentQueue.get(willBlock)
 				for position,analyzedTerm in enumerate(analyzedDocument.analyzedTermList):
 					for termId,extent in analyzedTerm.instanceSet:
@@ -372,8 +393,8 @@ class ReverseIndex(object):
 			return [self.lexicon[termId] for termId in sorted(self.lexicon)]
 
 		def _postingIngressThread(self):
+			willBlock = True
 			while 1:
-				willBlock = True
 				termId,docId,position,extent = self.postingQueue.get(willBlock)
 				if self.partitions[0].reachedTermInstanceLimit():
 					print >> sys.stderr, "Extending partitions"
@@ -381,6 +402,7 @@ class ReverseIndex(object):
 						partitionName = "EXP%d" % k
 						return openIndexPartition(partitionName,self.makePartitionName(partitionName),indexKey=self.indexKey)
 					self.growthStrategy.mergePartitions(_lexiconTermIds(self),self.partitions,_externalPartitionConstructor)
+					self.externalPartitionCount = len(self.partitions) - 1
 				self.partitions[0].addTermInstance(termId,docId,position,extent)
 
 		self.postingQueue = Queue.Queue(-1)
