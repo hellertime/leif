@@ -278,6 +278,38 @@ class ComputedMatchVector(object):
 	
 	def __repr__(self): return "#CMV:%s..." % (repr(self.realizedComputedMatchVector))
 
+def computedMatchVectorOrOp(*computedMatchVectors):
+	"""Return a new ComputedMatchVector which is a set of all inputs"""
+	def computedMatchGenerator():
+		yieldingVectors = [lazy.peekable(computedMatchVector) for computedMatchVector in computedMatchVectors]
+		while yieldingVectors:
+			yieldingVectorList = None
+			matchToYield = None
+			for vectorIndex,vector in enumerate(yieldingVectors):
+				computedMatch = vector.peek()
+				if matchToYield is None: 
+					matchToYield = computedMatch
+					yieldingVectorList = [vectorIndex]
+				else:
+					if matchToYield.docId == computedMatch.docId:
+						matchToYield += computedMatch
+						yieldingVectorList.append(vectorIndex)
+					elif computedMatch.docId < matchToYield.docId:
+						matchToYield = computedMatch
+						yieldingVectorList = [vectorIndex]
+
+			emptyVectorList = list()
+			for vectorIndex in yieldingVectorList:
+				try:
+					yieldingVectors[vectorIndex].next()
+				except StopIteration:
+					emptyVectorList.append(vectorIndex)
+
+			yieldingVectors = [vector for vectorIndex,vector in enumerate(yieldingVectors) if vectorIndex not in emptyVectorList]
+			if matchToYield: yield matchToYield
+	
+	return ComputedMatchVector(computedMatchGenerator())
+
 def computedMatchVectorAndOp(*computedMatchVectors):
 	"""Return a new ComputedMatchVector where all ComputedMatch(es) has equal docId(s)"""
 	def computedMatchGenerator():
@@ -403,6 +435,7 @@ OP_AFTER = 4
 OP_MINOC = 5
 OP_WITHIN = 6
 OP_SCOPE = 7
+OP_OR = 8
 
 def computedMatchVectorOp(opcode):
 	if opcode == OP_AND: return computedMatchVectorAndOp
@@ -412,5 +445,6 @@ def computedMatchVectorOp(opcode):
 	elif opcode == OP_MINOC: return computedMatchVectorMinocOp
 	elif opcode == OP_WITHIN: return computedMatchVectorWithinOp
 	elif opcode == OP_SCOPE: return computedMatchVectorScopeOp
+	elif opcode == OP_OR: return computedMatchVectorOrOp
 	else:
 		raise ValueError("Unknown opcode %d" % opcode)

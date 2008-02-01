@@ -185,12 +185,12 @@ class ExternalPartition(object):
 		# makes the main merge code easier to understand, sacrificing overval function length
 		def _growPartitionFile(howMuch):
 			"""extend the disk partition by howMuch"""
-			if not os.path.exists(self.path):
-				print >> sys.stderr, "Creating ExternalPartiton %s" % self.path
-				fp = open(self.path,"wb")
-			else: # prevent truncation on existing file
+			if os.path.exists(self.path): # prevent trucating existing file
 				print >> sys.stderr, "Extending ExternalPartition %s" % self.path
 				fp = open(self.path,"rb+")
+			else:
+				print >> sys.stderr, "Creating ExternalPartiton %s" % self.path
+				fp = open(self.path,"wb")
 
 			fp.seek(0,SEEK_END)
 			previousSize = fp.tell()

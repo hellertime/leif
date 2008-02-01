@@ -33,6 +33,8 @@ def reduceTopLevel(expressionTree,initialEnvironment):
 			# Dispatch on rator
 			if rator == "Term":
 				return reduceTerm(rands,initialEnvironment)
+			elif rator == "Or":
+				return reduceOrOp(rands,initialEnvironment)
 			elif rator == "And":
 				return reduceAndOp(rands,initialEnvironment)
 			elif rator == "Andnot":
@@ -64,6 +66,7 @@ def reduceSimpleOperator(opcode,expressionTree,environmentFrames):
 	return op(*[reduceTopLevel(expression,environmentFrames) for expression in expressionTree])
 
 def reduceAndOp(expressionTree,environmentFrames): return reduceSimpleOperator(data.OP_AND,expressionTree,environmentFrames)
+def reduceOrOp(expressionTree,environmentFrames): return reduceSimpleOperator(data.OP_OR,expressionTree,environmentFrames)
 def reduceAndnotOp(expressionTree,environmentFrames): return reduceSimpleOperator(data.OP_ANDNOT,expressionTree,environmentFrames)
 def reduceBeforeOp(expressionTree,environmentFrames): return reduceSimpleOperator(data.OP_BEFORE,expressionTree,environmentFrames)
 def reduceAfterOp(expressionTree,environmentFrames): return reduceSimpleOperator(data.OP_AFTER,expressionTree,environmentFrames)
