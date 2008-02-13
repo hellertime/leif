@@ -317,7 +317,7 @@ class ReverseIndex(object):
 		self.path = _path
 		self.partitionPrefix = _partitionPrefix
 		self.indexKey = _indexKey
-		self.growthStrategy = GrowthStrategyFixedBuffer(4096,3)
+		self.growthStrategy = GrowthStrategyFixedBuffer(512,3)
 		self.makePartitionName = lambda name: os.sep.join([self.path,self.partitionPrefix + ".%s" % name])
 
 		mmp = openIndexPartition("MMP",":memory:%s" % self.makePartitionName("MMP"),indexKey=self.indexKey)

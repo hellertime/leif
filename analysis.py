@@ -58,12 +58,12 @@ class ReutersCorpusParser(object):
 		self.parser.parse(path)
 	
 	def addTermWordToTermWords(self,termWord):
-		if str(termWord) not in self.termWords:
-			self.termWords[str(termWord)] = self.nextTermId
+		if termWord not in self.termWords:
+			self.termWords[termWord] = self.nextTermId
 			self.nextTermId += 1
 	
 	def getTermWordTermId(self,termWord):
-		termWord = str(termWord)
+		termWord = termWord
 		if termWord not in self.termWords:
 			self.termWords[termWord] = self.nextTermId
 			self.nextTermId += 1

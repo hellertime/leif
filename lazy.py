@@ -7,6 +7,7 @@ conform to the lazy protocol.
 """
 import collections
 import itertools
+import os
 import sys
 
 class peekable:
@@ -170,3 +171,17 @@ def nary_subset(S,n):
 		if ss:
 			for s in chain(imap(lambda s: [s0] + s,nary_subset(ss,n-1)),nary_subset(ss,n)):
 				yield s
+
+def recursiveListdir(root,joinToRoot=False):
+	"""Recurse down directory tree, yielding files"""
+	for entry in os.listdir(root):
+		entryPath = os.sep.join([root,entry])
+		if os.path.isdir(entryPath):
+			for entry in recursiveListdir(entryPath,joinToRoot):
+				yield entry
+		else:
+			if joinToRoot:
+				yield entryPath
+			else:
+				yield entry
+	
