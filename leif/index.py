@@ -12,12 +12,12 @@ import sys
 import threading
 import time
 
-DefaultMetadataFileSuffix = ".meta"
+defaultMetadataFileSuffix = ".meta"
 
 class ReverseIndexKeyError(exceptions.Exception):
 	"""raise if the indexKey does not match its expected value"""
 
-def openIndexPartition(name,path,metadataFileSuffix=DefaultMetadataFileSuffix,indexKey=None):
+def openIndexPartition(name,path,metadataFileSuffix=defaultMetadataFileSuffix,indexKey=None):
 	"""Creates the appropriate partition based on the path
 
 	MemoryPartitons will be created if the path starts with :memory:"""
@@ -100,7 +100,7 @@ class ExternalPartition(object):
 	In memory it must maintan only enough information to read the proper table for a termId
 	This in-memory data must be explicitly preserved to disk, and will be loaded at __init___"""
 	__slots__ = ["name","path","indexKey","metadataFileSuffix","termInstanceLimit","termIdHash","fp","mmap"]
-	def __init__(self,_name,_path,_metadataFileSuffix=DefaultMetadataFileSuffix,_indexKey=None):
+	def __init__(self,_name,_path,_metadataFileSuffix=defaultMetadataFileSuffix,_indexKey=None):
 		self.name = _name
 		self.path = _path
 		self.indexKey = _indexKey
