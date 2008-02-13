@@ -1,6 +1,5 @@
-import analysis
+from leif import analysis, lazy
 import itertools
-import lazy
 import os
 import sys
 
